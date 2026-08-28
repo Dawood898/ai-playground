@@ -10,7 +10,7 @@ class_name = "WindowLimiter"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["WindowLimiter"]
+new_sqlite_classes = ["WindowLimiter"]
 
 [vars]
 # Requests per minute, enforced per-IP AND per-session
@@ -18,7 +18,7 @@ MAX_RPM = "10"
 # Your new-api base URL, no trailing slash. e.g. https://api.yourdomain.com
 UPSTREAM_BASE = "https://api.yourdomain.com"
 # Comma-separated origins allowed to call this Worker (your GitHub Pages site):
-ALLOWED_ORIGINS = "https://YOUR-USERNAME.github.io"
+ALLOWED_ORIGINS = "https://dawood898.github.io"
 # Comma-separated model ids exposed on the playground.
 # Empty = everything the token can see (NOT recommended).
 ALLOWED_MODELS = "gpt-4o-mini,claude-3-5-haiku-20241022"

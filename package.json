@@ -7,9 +7,10 @@
     "upstream": "node mock/upstream.js",
     "site": "node mock/static-server.js",
     "worker": "wrangler dev worker/index.js --config worker/wrangler.toml --var UPSTREAM_BASE:http://127.0.0.1:3000 --var ALLOWED_ORIGINS:http://localhost:8080 --ip 127.0.0.1 --port 8787",
-    "deploy": "wrangler deploy --config worker/wrangler.toml"
+    "deploy": "wrangler deploy --config worker/wrangler.toml",
+    "preview": "wrangler dev --config worker/wrangler.toml"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.127.0"
   }
 }
