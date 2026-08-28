@@ -23,11 +23,15 @@ export default {
 
     // No browser sends a forged Origin; non-browsers (curl) send none.
     // Reject anything not on the allowlist. (Cosmetic gate, not real
-    // security — the real gates are rate limit + restricted token.)
+    // security — the real gates are Turnstile + rate limit + restricted token.)
     // Same-origin GETs from browsers carry NO Origin header at all, so an
-    // empty origin is allowed through (it can only come from this Worker's
-    // own domain or a non-browser client, which could forge it anyway).
-    if (allowed.length > 0 && origin && !allowed.includes(origin)) {
+    // empty origin is allowed through.
+    // On localhost (wrangler dev) the gate is skipped: miniflare rewrites the
+    // browser's Origin to the route pattern, so a dev page can never present
+    // its real origin. The deployed Worker's host is always chat.latency.cyou,
+    // so this branch never runs in production.
+    const isDevHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    if (!isDevHost && allowed.length > 0 && origin && !allowed.includes(origin)) {
       return json({ error: { message: 'Forbidden origin.' } }, 403, env, null);
     }
 
@@ -49,48 +53,54 @@ export default {
       return json({ error: { message: 'Unknown endpoint.' } }, 404, env, origin);
     }
 
-    // --- rate limit: IP bucket AND session bucket ------------------------
     const ip = request.headers.get('CF-Connecting-IP') || 'unknown-ip';
     const session = (request.headers.get('X-Session') || '').slice(0, 64) || ip;
     const max = Number(env.MAX_RPM || 10);
 
-    // --- Turnstile human check (chat only, if configured) ------------------
-    // Verified BEFORE the rate limiter so forged/replayed requests don't
-    // burn a visitor's quota — and so bots can't consume IP buckets either.
-    if (upstreamPath === '/v1/chat/completions' && env.TURNSTILE_SECRET_KEY) {
+    // --- Turnstile human check: EVERY /v1/* route ------------------------
+    // This is what makes the Worker a playground backend rather than a
+    // public API URL: each request needs a fresh, single-use token minted
+    // by the widget on chat.latency.cyou (tokens are bound to that hostname
+    // and to the requester's IP). curl-with-a-key no longer works.
+    // Verified BEFORE the rate limiter so replayed/forged requests can't
+    // burn a visitor's quota.
+    if (env.TURNSTILE_SECRET_KEY) {
       const token = (request.headers.get('X-Turnstile') || '').slice(0, 2048);
       if (!token) {
         return json(
-          { error: { message: 'Human verification required — complete the check and send again.', type: 'verification_error', code: 'missing_turnstile' } },
-          400, env, origin
+          { error: { message: 'Human verification required.', type: 'verification_error', code: 'missing_turnstile' } },
+          403, env, origin
         );
       }
       const passed = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, token, ip);
       if (!passed) {
         return json(
-          { error: { message: 'Human verification expired or failed — press send again.', type: 'verification_error', code: 'bad_turnstile' } },
-          400, env, origin
+          { error: { message: 'Human verification failed or expired.', type: 'verification_error', code: 'bad_turnstile' } },
+          403, env, origin
         );
       }
     }
 
-    const [ipResult, sessionResult] = await Promise.all([
-      checkLimit(env, 'ip:' + ip, max, WINDOW_SECONDS),
-      checkLimit(env, 'session:' + session, max, WINDOW_SECONDS),
-    ]);
+    // --- rate limit: chat only (models list is Turnstile-gated, cheap) ----
+    if (upstreamPath === '/v1/chat/completions') {
+      const [ipResult, sessionResult] = await Promise.all([
+        checkLimit(env, 'ip:' + ip, max, WINDOW_SECONDS),
+        checkLimit(env, 'session:' + session, max, WINDOW_SECONDS),
+      ]);
 
-    if (!ipResult.ok || !sessionResult.ok) {
-      const retryAfter = Math.max(
-        ipResult.ok ? sessionResult.reset : ipResult.reset,
-        1
-      );
-      const body = {
-        error: {
-          message: `Rate limit reached: ${max} requests per minute. Try again in ~${retryAfter}s.`,
-          type: 'rate_limit_error',
-        },
-      };
-      return json(body, 429, env, origin, { 'Retry-After': String(retryAfter) });
+      if (!ipResult.ok || !sessionResult.ok) {
+        const retryAfter = Math.max(
+          ipResult.ok ? sessionResult.reset : ipResult.reset,
+          1
+        );
+        const body = {
+          error: {
+            message: `Rate limit reached: ${max} requests per minute. Try again in ~${retryAfter}s.`,
+            type: 'rate_limit_error',
+          },
+        };
+        return json(body, 429, env, origin, { 'Retry-After': String(retryAfter) });
+      }
     }
 
     // --- model allowlist ---------------------------------------------------

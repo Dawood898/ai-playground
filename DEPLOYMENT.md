@@ -17,13 +17,20 @@ Visitor's browser
    ▼
 Cloudflare Worker "playground-proxy"
    ├── /            → serves docs/index.html (the page itself)
-   ├── /v1/models   → filtered list of allowed models
+   ├── /v1/models   → Turnstile-gated, filtered list of allowed models
    └── /v1/chat/completions
-         1. Turnstile human check (if configured)
-         2. Rate limit: 10 req/min per IP AND per session tab
+         1. Turnstile human check (every /v1/* route)
+         2. Rate limit: 10 req/min per IP AND per session tab (chat only)
          3. Model allowlist check
          4. Forwards to https://api.latency.cyou with your secret key
 ```
+
+The Turnstile check on **every** `/v1/*` route is what locks the domain down:
+it only answers the playground page, never a raw API. `curl` with any key
+gets `403 Human verification required` — each request needs a fresh,
+single-use token minted by the widget on chat.latency.cyou (tokens are bound
+to that hostname and to the requester's IP). The workers.dev mirror URL is
+disabled too (`workers_dev = false`), so there is exactly one entry point.
 
 Your real new-api key lives **only** inside Cloudflare as a Worker secret
 (`NEW_API_KEY`). It is never in this repo, never in the page, never in the
@@ -74,7 +81,8 @@ of truth.
 
 `worker/wrangler.toml` → `MAX_RPM = "10"` → redeploy (same command as above).
 It's a fixed 60-second window counted twice: once per visitor IP, once per
-browser tab (session id in localStorage).
+browser tab (session id in localStorage). Only `/v1/chat/completions` counts
+against it — the model list is Turnstile-gated but free.
 
 ## Rotate / replace the new-api key
 
@@ -92,55 +100,58 @@ add comma-separated origins → redeploy.
 
 ---
 
-## Turnstile human check (the one manual step)
+## Turnstile human check (configured — reference)
 
-The Worker skips the human check until a secret exists, so the site works
-right now without it. To enable:
+**Status: live.** The widget `playground` (Managed mode, hostname
+`chat.latency.cyou`) is created, its secret is uploaded as the
+`TURNSTILE_SECRET_KEY` Worker secret, and the sitekey is hardcoded in
+`docs/index.html` (`TURNSTILE_SITEKEY = '0x4AAAAAAEfWe-UOt9lYfMGB'`).
+Every `/v1/*` request must carry a fresh token from that widget or the
+Worker answers `403 missing_turnstile`.
 
-### 1. Create the widget (dashboard — Cloudflare, Aug 2026 UI)
+If you ever need to recreate it (dashboard — Cloudflare, Aug 2026 UI):
 
 1. Open https://dash.cloudflare.com/?to=/:account/turnstile
    (or: log in → right sidebar **Turnstile**).
-2. Click **Add widget**.
-3. Fill in:
-   - **Widget name**: `playground`
-   - **Hostname management**: `chat.latency.cyou`
-   - **Widget mode**: **Managed** (invisible unless suspicious)
-4. Click **Create**.
-5. Copy both strings shown: the **Sitekey** (`0x4...`) and the **Secret key** (`0x4...`).
-
-### 2. Install them
-
-Secret → Cloudflare (PowerShell, from the `ai-playground` folder):
+2. Click **Add widget** → **Widget name**: `playground`,
+   **Hostname management**: `chat.latency.cyou`, **Widget mode**: **Managed**.
+3. Copy both strings shown: the **Sitekey** (`0x4...`) and the **Secret key** (`0x4...`).
+4. Secret → Cloudflare (PowerShell, from the `ai-playground` folder):
 
 ```powershell
 echo "PASTE-SECRET-KEY" | npx wrangler secret put TURNSTILE_SECRET_KEY --config worker/wrangler.toml
 ```
 
-Sitekey → the page: open `docs/index.html`, find the line
+5. Sitekey → the page: open `docs/index.html`, find the line
 
 ```js
-const TURNSTILE_SITEKEY = '1x00000000000000000000AA';
+const TURNSTILE_SITEKEY = '0x4AAAAAAEfWe-UOt9lYfMGB';
 ```
 
-replace `1x00000000000000000000AA` with your real sitekey, save, then:
+replace the value, save, then:
 
 ```powershell
 git add docs/index.html
-git commit -m "real turnstile sitekey"
+git commit -m "turnstile sitekey update"
 git push
 npx wrangler deploy --config worker/wrangler.toml
 ```
 
-### 3. Verify
+### Verify
 
 Open https://chat.latency.cyou in a normal browser, send a message. It should
-answer. Then in DevTools → Network, the chat request carries an `X-Turnstile`
+answer. In DevTools → Network, the chat request carries an `X-Turnstile`
 header. If you set the secret but forgot the sitekey (or vice versa), sends
 fail with "Human verification required" — fix whichever half is missing.
 
-Note: tokens expire after 5 minutes and are single-use; the page auto-refreshes
-the widget, so a user who idles just presses send again.
+Note: tokens expire after 5 minutes and are single-use; the page resets the
+widget after every request (including the models fetch on load), so a user
+who idles just presses send again.
+
+To **disable** the check again (e.g. for debugging):
+`npx wrangler secret delete TURNSTILE_SECRET_KEY --config worker/wrangler.toml`.
+The Worker skips the check when the secret is absent. Don't forget to
+re-upload it — without it the domain is a public API endpoint again.
 
 ---
 
@@ -161,17 +172,32 @@ npx wrangler deploy --config worker/wrangler.toml
 ## Local development
 
 ```powershell
-# Terminal 1 — the Worker locally (uses worker/.dev.vars for test keys)
 npx wrangler dev --config worker/wrangler.toml
-
-# Terminal 2 — the page, pointed at localhost:8787 automatically
-npx serve docs
 ```
 
-Open http://localhost:3000 (serve's port). The page detects `localhost` and
-talks to `http://localhost:8787` instead of the real API. `worker/.dev.vars`
-holds a throwaway key + Cloudflare's global test Turnstile keys; it is
-gitignored and must never be committed.
+Open http://localhost:8787 — the dev Worker serves the page **and** the API
+from one port (assets are bundled), so no second server is needed. The page
+detects `localhost` and stays same-origin.
+
+`worker/.dev.vars` (gitignored, never commit) holds the throwaway key. Keep
+`TURNSTILE_SECRET_KEY` commented out there: with no secret the Worker skips
+the human check locally, which is the only way to test the chat path without
+a real browser on the real hostname.
+
+Two gotchas learned the hard way:
+
+- **Origin gate vs miniflare.** `wrangler dev` rewrites the browser's
+  `Origin: http://localhost:8787` to the route pattern
+  (`http://chat.latency.cyou`), so the Worker can't see the dev page's real
+  origin. The gate therefore skips requests whose *host* is
+  `localhost`/`127.0.0.1` (see `isDevHost` in `worker/index.js`). The
+  deployed Worker's host is always `chat.latency.cyou`, so production is
+  unaffected.
+- **Automation can't pass Turnstile — that's the feature.** Headless Chrome
+  never renders the widget, and a CDP-attached real browser gets Cloudflare's
+  managed challenge. So the positive end-to-end path (token → chat) can only
+  be verified by a human in a normal browser at https://chat.latency.cyou.
+  Locally, verify wiring with the secret skipped.
 
 ---
 

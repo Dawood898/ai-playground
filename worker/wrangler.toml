@@ -5,7 +5,8 @@ compatibility_date = "2026-08-01"
 # The playground page itself is served by this Worker (asset-first routing:
 # /v1/* hits the Worker code, everything else serves docs/index.html).
 assets = { directory = "../docs" }
-workers_dev = true
+# Only chat.latency.cyou serves this Worker. No public workers.dev mirror.
+workers_dev = false
 
 # Serve the playground + API on your own domain (Cloudflare creates the DNS record).
 routes = [
