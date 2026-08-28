@@ -486,11 +486,11 @@ kbd {
   // ⚙️  CONFIG — EDIT THESE TWO LINES BEFORE DEPLOYING
   // ======================================================================
 
-  // Your Cloudflare Worker URL (from `wrangler deploy`).
-  // localhost automatically hits the local dev worker — no change needed for testing.
+  // Same-origin in production (the Worker serves this page AND the API on
+  // chat.latency.cyou). localhost dev hits the local wrangler dev worker.
   const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:8787'
-    : 'https://playground-proxy.beetlesmpfun.workers.dev';
+    : '';
 
   // Cloudflare's global TEST sitekey (always passes, no challenge shown).
   // Replace with your real sitekey: dash.cloudflare.com → Turnstile → your widget.

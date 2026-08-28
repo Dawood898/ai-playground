@@ -2,6 +2,16 @@ name = "playground-proxy"
 main = "index.js"
 compatibility_date = "2026-08-01"
 
+# The playground page itself is served by this Worker (asset-first routing:
+# /v1/* hits the Worker code, everything else serves docs/index.html).
+assets = { directory = "../docs" }
+workers_dev = true
+
+# Serve the playground + API on your own domain (Cloudflare creates the DNS record).
+routes = [
+  { pattern = "chat.latency.cyou", custom_domain = true },
+]
+
 # Durable Object gives us a shared, consistent counter across all Workers
 # instances (free tier includes 1 GB storage / 5 GB egress — plenty).
 [[durable_objects.bindings]]
@@ -13,15 +23,14 @@ tag = "v1"
 new_sqlite_classes = ["WindowLimiter"]
 
 [vars]
-# Requests per minute, enforced per-IP AND per-session
 MAX_RPM = "10"
-# Your new-api base URL, no trailing slash. e.g. https://api.yourdomain.com
-UPSTREAM_BASE = "https://api.yourdomain.com"
-# Comma-separated origins allowed to call this Worker (your GitHub Pages site):
-ALLOWED_ORIGINS = "https://dawood898.github.io"
+# Your new-api base URL, no trailing slash.
+UPSTREAM_BASE = "https://api.latency.cyou"
+# Comma-separated origins allowed to call this Worker:
+ALLOWED_ORIGINS = "https://chat.latency.cyou"
 # Comma-separated model ids exposed on the playground.
 # Empty = everything the token can see (NOT recommended).
-ALLOWED_MODELS = "gpt-4o-mini,claude-3-5-haiku-20241022"
+ALLOWED_MODELS = "deepseek-v4-flash,glm-5.3-flash,qwen3.8-flash,qwen3.8-max,kimi-k3,kimi-k2.7-code,gpt-5.6-sol,grok-4.6,llama-3-8b-instruct,mistral-small-24b-instruct-2501,codestral-latest"
 
 # Secrets (set with `wrangler secret put`, never in this file):
 #   NEW_API_KEY           — a DEDICATED new-api token with its own quota, used only by this Worker

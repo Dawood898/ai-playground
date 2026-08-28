@@ -24,7 +24,10 @@ export default {
     // No browser sends a forged Origin; non-browsers (curl) send none.
     // Reject anything not on the allowlist. (Cosmetic gate, not real
     // security — the real gates are rate limit + restricted token.)
-    if (allowed.length > 0 && !allowed.includes(origin)) {
+    // Same-origin GETs from browsers carry NO Origin header at all, so an
+    // empty origin is allowed through (it can only come from this Worker's
+    // own domain or a non-browser client, which could forge it anyway).
+    if (allowed.length > 0 && origin && !allowed.includes(origin)) {
       return json({ error: { message: 'Forbidden origin.' } }, 403, env, null);
     }
 
@@ -135,12 +138,22 @@ export default {
     } catch (e) {
       return json({ error: { message: 'Upstream unreachable.' } }, 502, env, origin);
     }
-
     // Copy upstream response, strip its CORS, attach ours.
     const outHeaders = new Headers(upstreamResponse.headers);
     outHeaders.delete('access-control-allow-origin');
     outHeaders.delete('access-control-allow-credentials');
     applyCors(outHeaders, origin);
+
+    // /v1/models: only expose allowlisted models to the public.
+    if (upstreamPath === '/v1/models' && allowlist.length > 0 && upstreamResponse.ok) {
+      try {
+        const data = await upstreamResponse.json();
+        data.data = (data.data || []).filter((m) => allowlist.includes(m.id));
+        return json(data, 200, env, origin);
+      } catch {
+        return json({ error: { message: 'Bad upstream models response.' } }, 502, env, origin);
+      }
+    }
 
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
