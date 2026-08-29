@@ -183,6 +183,9 @@
       min-height: 0;
 
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+
+      overscroll-behavior: contain;
 
       scrollbar-width: thin;
       scrollbar-color: #34312e transparent;
@@ -196,7 +199,7 @@
       padding:
         92px
         0
-        195px;
+        56px;
     }
 
     /* ==========================================================
@@ -483,33 +486,14 @@
     ========================================================== */
 
     .composer-area {
-      position: absolute;
-
-      left: 0;
-      right: 0;
-      bottom: 0;
+      flex-shrink: 0;
 
       display: flex;
       justify-content: center;
 
       padding:
         0 24px
-        18px;
-
-      pointer-events: none;
-
-      background:
-        linear-gradient(
-          to bottom,
-          transparent 0,
-          rgba(24,23,22,.58) 22%,
-          rgba(24,23,22,.92) 58%,
-          var(--bg) 100%
-        );
-
-      z-index: 10;
-      /* Clear the brand footer so it isn't painted over by the gradient. */
-      transform: translateY(-32px);
+        14px;
     }
 
     .composer-wrap {
@@ -517,8 +501,6 @@
         var(--composer-width),
         100%
       );
-
-      pointer-events: auto;
     }
 
     /* ==========================================================
@@ -804,12 +786,12 @@
 
     /* ==========================================================
        TURNSTILE
-       Kept visible (bottom-left) and rendered with
-       appearance:'always' so every page load requires the visitor
-       to actively pass the human check — the token is single-use
-       server-side, so a stale/auto token can never be reused.
-       The widget is reset (refreshed) on pageshow / tab focus and
-       after each API call.
+       Rendered with appearance:'interaction-only', so the widget is hidden
+       by default (only appearing if Turnstile actually needs to challenge the
+       visitor) — it never overlaps the page. Managed mode mints a token once
+       per page load, and the Worker keeps a per-session grant, so the widget
+       is not reset on pageshow / tab focus or after each API call. If the
+       grant lapses, the submit handler refreshes the widget and re-verifies.
     ========================================================== */
 
     #turnstile-box {
@@ -994,7 +976,7 @@
         padding:
           63px
           0
-          174px;
+          44px;
       }
 
       .empty-state h1 {
@@ -1582,6 +1564,11 @@
 
   let activeController = null;
 
+  // True once the Worker has accepted our Turnstile pass for this session. The
+  // Worker stores a short-lived grant, so on later requests we can omit the
+  // token and stop resetting the widget on every message.
+  let sessionVerified = false;
+
   const history = [];
 
   /* ==========================================================
@@ -1641,9 +1628,12 @@
 
     // api.js is loaded with async+defer, so turnstile.ready() would throw.
     // Explicit render() is the supported path here (fires via onload hook too).
-    // appearance:'always' keeps the checkbox visible bottom-left, so every
-    // page load requires the visitor to actively pass the human check — it is
-    // never skipped or auto-hidden until a challenge is forced.
+    // appearance:'interaction-only' hides the widget so it never overlaps the
+    // page; it only appears if Turnstile actually needs to challenge the
+    // visitor. Managed mode mints a token once per page load, and the Worker
+    // now remembers the session as "verified" (short-lived grant), so the
+    // widget is NOT reset on every request — the visitor passes the human
+    // check once per refresh, not per message.
     tsWidget =
       turnstile.render(
         '#turnstile-box',
@@ -1659,7 +1649,7 @@
             'compact',
 
           appearance:
-            'always',
+            'interaction-only',
 
           execution:
             'render',
@@ -1849,9 +1839,10 @@
 
   /* ==========================================================
      MODELS
-     Every /v1/* call is Turnstile-gated server-side, so the
-     models fetch carries a token too and retries once if the
-     widget was still warming up.
+     The first /v1/* call in a session carries the Turnstile token so the
+     Worker can verify it and store a short-lived session grant. Once that
+     succeeds we set sessionVerified and stop sending the token (and stop
+     resetting the widget) on every request.
   ========================================================== */
 
   async function fetchModels() {
@@ -1859,7 +1850,9 @@
     for (let attempt = 0; attempt < 3; attempt++) {
 
       const token =
-        await waitForToken(attempt === 0 ? 5000 : 8000);
+        sessionVerified
+          ? null
+          : await waitForToken(attempt === 0 ? 5000 : 8000);
 
       const headers = {
         'X-Session':
@@ -1879,6 +1872,9 @@
         );
 
       if (response.ok) {
+
+        sessionVerified =
+          true;
 
         return response.json();
       }
@@ -1901,6 +1897,11 @@
         ) &&
         attempt < 2
       ) {
+
+        // The grant lapsed (or the token was rejected): drop the verified flag
+        // so the next attempt mints a fresh token instead of sending none.
+        sessionVerified =
+          false;
 
         refreshTurnstile();
 
@@ -1964,10 +1965,6 @@
         $model.innerHTML =
           '<option>No models available</option>';
       }
-
-      // The token spent on /v1/models is single-use — reset the widget so
-      // the first chat send gets a fresh one instead of a 403 bad_turnstile.
-      refreshTurnstile();
 
     } catch (error) {
 
@@ -2226,21 +2223,46 @@
 
   /* ==========================================================
      SCROLL
+     Stick-to-bottom: while a stream is running we only auto-scroll if the
+     visitor is already near the bottom. If they scroll up to read earlier
+     text, we leave them alone (instead of yanking them back down on every
+     chunk with behavior:'smooth'). Scrolling back down re-engages the
+     auto-follow. This is what unblocks scrolling on mobile during a request.
   ========================================================== */
 
+  const SCROLL_STICK_DISTANCE = 80;
+
+  let stickBottom =
+    true;
+
+  $log.addEventListener(
+    'scroll',
+    () => {
+
+      const distance =
+        $log.scrollHeight -
+        $log.scrollTop -
+        $log.clientHeight;
+
+      stickBottom =
+        distance <=
+        SCROLL_STICK_DISTANCE;
+    },
+    { passive: true }
+  );
+
   function scrollBottom() {
+
+    if (!stickBottom) {
+
+      return;
+    }
 
     requestAnimationFrame(
       () => {
 
-        $log.scrollTo({
-          top:
-            $log.scrollHeight,
-
-          behavior:
-            'smooth'
-        });
-
+        $log.scrollTop =
+          $log.scrollHeight;
       }
     );
   }
@@ -2415,6 +2437,11 @@
       let firstTokenAt =
         null;
 
+      // A new send re-engages stick-to-bottom so the user message and the
+      // streamed answer scroll into view even if the visitor had scrolled up.
+      stickBottom =
+        true;
+
       createMessage(
         'user',
         text
@@ -2449,7 +2476,9 @@
       try {
 
         const token =
-          await waitForToken();
+          sessionVerified
+            ? null
+            : await waitForToken();
 
         const headers = {
           'Content-Type':
@@ -2490,7 +2519,11 @@
             }
           );
 
-        refreshTurnstile();
+        if (response.ok) {
+
+          sessionVerified =
+            true;
+        }
 
         used += 1;
 
@@ -2525,6 +2558,9 @@
             code ===
               'bad_turnstile'
           ) {
+
+            sessionVerified =
+              false;
 
             message +=
               ' — security check refreshed, try again.';
@@ -2854,17 +2890,16 @@
      START
   ========================================================== */
 
-  // Force a fresh Turnstile challenge on every page load / restore.
-  // The widget is rendered with appearance:'always', so it is always
-  // visible; resetting it on pageshow (bfcache restore) and on tab
-  // focus re-runs the human check instead of reusing a stale token.
+  // The Worker now keeps a per-session Turnstile grant (see index.js), so the
+  // widget is only solved once per refresh and is NOT reset on tab restore or
+  // refocus. bfcache restores just re-fetch the live model list; if the session
+  // grant has lapsed, the next request re-verifies on its own (reset via the
+  // missing/bad turnstile error path in the submit handler).
   window.addEventListener(
     'pageshow',
     event => {
 
       if (event.persisted) {
-
-        refreshTurnstile();
 
         loadModels();
       }
@@ -2878,10 +2913,11 @@
       if (
         document.visibilityState ===
           'visible' &&
-        !busy
+        !busy &&
+        !sessionVerified
       ) {
 
-        refreshTurnstile();
+        loadModels();
       }
     }
   );

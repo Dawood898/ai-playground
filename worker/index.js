@@ -11,6 +11,11 @@
 
 const WINDOW_SECONDS = 60;
 
+// How long a single Turnstile pass keeps a browser session "verified" so we
+// don't challenge the visitor on every request. After it lapses, the worker
+// asks for a fresh token (same session re-verifies invisibly via managed mode).
+const VERIFY_TTL_SECONDS = 1800;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -57,27 +62,34 @@ export default {
     const session = (request.headers.get('X-Session') || '').slice(0, 64) || ip;
     const max = Number(env.MAX_RPM || 10);
 
-    // --- Turnstile human check: EVERY /v1/* route ------------------------
-    // This is what makes the Worker a playground backend rather than a
-    // public API URL: each request needs a fresh, single-use token minted
-    // by the widget on chat.latency.cyou (tokens are bound to that hostname
-    // and to the requester's IP). curl-with-a-key no longer works.
+    // --- Turnstile human check: verify ONCE per session -----------------
+    // Each /v1/* request used to need a fresh, single-use token, which forced
+    // the widget to be reset (and the visitor re-checked) on EVERY request.
+    // Now the first request in a session exchanges the token for a short-lived
+    // "verified" grant. Later requests from the same session (same X-Session,
+    // a UUID the page keeps in localStorage) skip the check until the grant
+    // expires — visitors only re-verify after a refresh/new session, the grant
+    // lapsing, or a rejected token.
     // Verified BEFORE the rate limiter so replayed/forged requests can't
     // burn a visitor's quota.
     if (env.TURNSTILE_SECRET_KEY) {
-      const token = (request.headers.get('X-Turnstile') || '').slice(0, 2048);
-      if (!token) {
-        return json(
-          { error: { message: 'Human verification required.', type: 'verification_error', code: 'missing_turnstile' } },
-          403, env, origin
-        );
-      }
-      const passed = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, token, ip);
-      if (!passed) {
-        return json(
-          { error: { message: 'Human verification failed or expired.', type: 'verification_error', code: 'bad_turnstile' } },
-          403, env, origin
-        );
+      const verified = await isSessionVerified(env, session);
+      if (!verified) {
+        const token = (request.headers.get('X-Turnstile') || '').slice(0, 2048);
+        if (!token) {
+          return json(
+            { error: { message: 'Human verification required.', type: 'verification_error', code: 'missing_turnstile' } },
+            403, env, origin
+          );
+        }
+        const passed = await verifyTurnstile(env.TURNSTILE_SECRET_KEY, token, ip);
+        if (!passed) {
+          return json(
+            { error: { message: 'Human verification failed or expired.', type: 'verification_error', code: 'bad_turnstile' } },
+            403, env, origin
+          );
+        }
+        await markSessionVerified(env, session, VERIFY_TTL_SECONDS);
       }
     }
 
@@ -182,8 +194,35 @@ export class WindowLimiter {
   }
 
   async fetch(request) {
-    const { key, max, window } = await request.json();
+    const url = new URL(request.url);
     const nowSec = Math.floor(Date.now() / 1000);
+
+    // --- verification grants (separate from rate-limit buckets) ----------
+    // GET  /verified?session=<id>  -> { ok } whether the session still has a
+    //                                 live Turnstile grant.
+    // POST /verify  { session, ttl } -> (re)issue a grant for ttl seconds.
+    if (url.pathname === '/verified' && request.method === 'GET') {
+      const session = url.searchParams.get('session') || '';
+      const grants = (await this.state.storage.get('v')) || {};
+      return Response.json({ ok: (grants[session] || 0) > nowSec });
+    }
+
+    if (url.pathname === '/verify' && request.method === 'POST') {
+      const body = await request.json();
+      const session = (body.session || '').slice(0, 64);
+      const ttl = Math.max(60, Number(body.ttl) || VERIFY_TTL_SECONDS);
+      const grants = (await this.state.storage.get('v')) || {};
+      grants[session] = nowSec + ttl;
+      // Prune expired grants so the object never grows unbounded.
+      for (const k of Object.keys(grants)) {
+        if (grants[k] <= nowSec) delete grants[k];
+      }
+      this.state.waitUntil(this.state.storage.put('v', grants));
+      return Response.json({ ok: true });
+    }
+
+    // --- rate limit (default route) ---------------------------------------
+    const { key, max, window } = await request.json();
     const w = Math.floor(nowSec / window);
 
     if (!this.buckets) {
@@ -229,6 +268,40 @@ async function checkLimit(env, key, max, window) {
     // Fail closed only on limiter crash would punish users; fail open is
     // acceptable because the new-api token itself is quota-limited.
     return { ok: true, reset: 0 };
+  }
+}
+
+// --- Turnstile session grant helpers --------------------------------------
+
+function getLimiterStub(env) {
+  const id = env.LIMITER.idFromName('playground');
+  return env.LIMITER.get(id);
+}
+
+async function isSessionVerified(env, session) {
+  if (!session) return false;
+  try {
+    const stub = getLimiterStub(env);
+    const res = await stub.fetch('https://limiter/verified?session=' + encodeURIComponent(session));
+    const data = await res.json();
+    return !!data.ok;
+  } catch {
+    // If the limiter is unreachable, fall back to requiring a fresh token so
+    // the check fails closed (it will be re-verified and re-granted).
+    return false;
+  }
+}
+
+async function markSessionVerified(env, session, ttl) {
+  if (!session) return;
+  try {
+    const stub = getLimiterStub(env);
+    await stub.fetch('https://limiter/verify', {
+      method: 'POST',
+      body: JSON.stringify({ session, ttl }),
+    });
+  } catch {
+    // Best-effort: the next request will re-verify and re-grant.
   }
 }
 

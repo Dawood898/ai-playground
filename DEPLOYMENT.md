@@ -25,12 +25,14 @@ Cloudflare Worker "playground-proxy"
          4. Forwards to https://api.latency.cyou with your secret key
 ```
 
-The Turnstile check on **every** `/v1/*` route is what locks the domain down:
-it only answers the playground page, never a raw API. `curl` with any key
-gets `403 Human verification required` — each request needs a fresh,
-single-use token minted by the widget on chat.latency.cyou (tokens are bound
-to that hostname and to the requester's IP). The workers.dev mirror URL is
-disabled too (`workers_dev = false`), so there is exactly one entry point.
+The Turnstile check on `/v1/*` routes is what locks the domain down:
+it only answers the playground page, never a raw API. A browser session
+exchanges one token (minted by the widget on chat.latency.cyou, bound to that
+hostname and the requester's IP) for a short-lived "verified" grant, so the
+visitor passes the human check **once per refresh** instead of on every
+request. `curl` with any key still gets `403 Human verification required`.
+The workers.dev mirror URL is disabled too (`workers_dev = false`), so there
+is exactly one entry point.
 
 Your real new-api key lives **only** inside Cloudflare as a Worker secret
 (`NEW_API_KEY`). It is never in this repo, never in the page, never in the
@@ -157,9 +159,10 @@ answer. In DevTools → Network, the chat request carries an `X-Turnstile`
 header. If you set the secret but forgot the sitekey (or vice versa), sends
 fail with "Human verification required" — fix whichever half is missing.
 
-Note: tokens expire after 5 minutes and are single-use; the page resets the
-widget after every request (including the models fetch on load), so a user
-who idles just presses send again.
+Note: each token is single-use, so the Worker turns the first pass into a
+per-session grant (`VERIFY_TTL_SECONDS`, default 30 min). The page therefore
+does NOT reset the widget on every request — a visitor verifies once per
+refresh and only re-verifies if the grant lapses or a token is rejected.
 
 To **disable** the check again (e.g. for debugging):
 `npx wrangler secret delete TURNSTILE_SECRET_KEY --config worker/wrangler.toml`.
@@ -201,11 +204,12 @@ All behavior is client-side; nothing needs a backend change to tweak.
   `0:59`-style countdown (`#rpmClock`). The window starts fresh (60 s) on
   every page load, so a refresh resets both the count and the timer. It's
   a local estimate — the server (Durable Object) is the authority.
-- **Force Turnstile on every refresh.** The widget renders with
-  `appearance:'always'` (always visible, never hidden). `loadModels()` and
-  the `pageshow` / `visibilitychange` handlers call `refreshTurnstile()`
-  (a reset), so bfcache restores and tab refocus re-run the human check
-  instead of reusing a stale token.
+- **Turnstile once per refresh.** The widget renders with
+  `appearance:'interaction-only'` (hidden until it needs to challenge, so it
+  never overlaps the page). Managed mode mints one token per page load and the
+  Worker keeps a `VERIFY_TTL_SECONDS` session grant, so `loadModels()` and
+  the `pageshow` / `visibilitychange` handlers no longer reset the widget —
+  bfcache restores and tab refocus do NOT re-run the human check.
 - **Live model dropdown.** The select is populated by `loadModels()` from
   `/v1/models`; with the empty allowlist that's the full live list.
 - **Removed dead tools.** Attach / Web / Options buttons and their no-op
