@@ -17,11 +17,11 @@ Visitor's browser
    ▼
 Cloudflare Worker "playground-proxy"
    ├── /            → serves docs/index.html (the page itself)
-   ├── /v1/models   → Turnstile-gated, filtered list of allowed models
+   ├── /v1/models   → Turnstile-gated, LIVE list (whatever this key sees)
    └── /v1/chat/completions
          1. Turnstile human check (every /v1/* route)
          2. Rate limit: 10 req/min per IP AND per session tab (chat only)
-         3. Model allowlist check
+         3. Model allowlist check (empty = every model allowed)
          4. Forwards to https://api.latency.cyou with your secret key
 ```
 
@@ -57,15 +57,27 @@ Two files matter:
 
 ---
 
-## Change the model list
+## The model list is LIVE (empty allowlist)
 
-Edit `worker/wrangler.toml`, line `ALLOWED_MODELS = "..."` — comma-separated,
-no spaces needed. Model ids must exist on your new-api instance for this key.
+`worker/wrangler.toml` → `ALLOWED_MODELS = ""` is the **live mode**: the
+Worker does NOT filter. `/v1/models` returns exactly what the new-api token
+can see right now, and any model id passes the chat check. The page dropdown
+and the public API therefore never show a stale or dead model — when new-api
+adds/removes a model, the playground follows automatically. The list churns
+basically daily, so hardcoding ids (the old behavior) is now deliberately
+avoided.
 
 To see all ids your key can currently use (PowerShell):
 
 ```powershell
 curl.exe -s https://api.latency.cyou/v1/models -H "Authorization: Bearer sk-YOUR-KEY" | ConvertFrom-Json | ForEach-Object { $_.data.id }
+```
+
+To **pin** to a fixed list again (e.g. you found a model you don't want the
+public poking), set `ALLOWED_MODELS` to a comma-separated list (no spaces):
+
+```toml
+ALLOWED_MODELS = "deepseek-v4-flash,glm-5.3-flash,qwen3.8-flash"
 ```
 
 Then republish:
@@ -74,8 +86,9 @@ Then republish:
 npx wrangler deploy --config worker/wrangler.toml
 ```
 
-The `/v1/models` endpoint and the dropdown both follow this list — one source
-of truth.
+Non-empty allowlist filters `/v1/models` AND rejects other models in chat —
+one source of truth. Empty allowlist = live passthrough. The page cares
+about neither: it renders whatever `/v1/models` returns.
 
 ## Change the rate limit
 
@@ -169,6 +182,37 @@ npx wrangler deploy --config worker/wrangler.toml
 
 (Commit + push to GitHub afterwards so the repo matches production.)
 
+## UI features (docs/index.html)
+
+All behavior is client-side; nothing needs a backend change to tweak.
+
+- **Stop button.** The send button is a submit that stays enabled while a
+  stream is in flight. It gains the `stop` class → red, icon swaps to a
+  square, label reads **Stop**. Clicking it calls
+  `AbortController.abort()`; the partial stream stays in the bubble, the
+  role label flips to **Stopped**, and a partial turn is still pushed to
+  history.
+- **TTFT + live tokens/s.** `t0 = performance.now()` before the fetch.
+  The first SSE delta (content OR hidden `reasoning_content`) sets TTFT;
+  token rate = chars/4 heuristic, updated per chunk and shown in the
+  `.live-stats` bar (TTFT and Speed). Reasoning tokens count toward the
+  rate but are never displayed (only `delta.content` renders in the bubble).
+- **Live RPM counter + countdown.** `#rpm` shows `N / 10 left` plus a
+  `0:59`-style countdown (`#rpmClock`). The window starts fresh (60 s) on
+  every page load, so a refresh resets both the count and the timer. It's
+  a local estimate — the server (Durable Object) is the authority.
+- **Force Turnstile on every refresh.** The widget renders with
+  `appearance:'always'` (always visible, never hidden). `loadModels()` and
+  the `pageshow` / `visibilitychange` handlers call `refreshTurnstile()`
+  (a reset), so bfcache restores and tab refocus re-run the human check
+  instead of reusing a stale token.
+- **Live model dropdown.** The select is populated by `loadModels()` from
+  `/v1/models`; with the empty allowlist that's the full live list.
+- **Removed dead tools.** Attach / Web / Options buttons and their no-op
+  listeners are gone; only **Clear** remains on the toolbar.
+- **Branding.** Header title links to https://latency.cyou/; the footer
+  credits "provided by @zealot.bond on discord · made with ♥".
+
 ## Local development
 
 ```powershell
@@ -192,7 +236,10 @@ Two gotchas learned the hard way:
   origin. The gate therefore skips requests whose *host* is
   `localhost`/`127.0.0.1` (see `isDevHost` in `worker/index.js`). The
   deployed Worker's host is always `chat.latency.cyou`, so production is
-  unaffected.
+  unaffected. To let the browser exercise the origin gate locally, add a
+  dev-only `ALLOWED_ORIGINS` override in `.dev.vars` (it overrides
+  `[vars]` locally and is gitignored):
+  `ALLOWED_ORIGINS=http://chat.latency.cyou,https://chat.latency.cyou`
 - **Automation can't pass Turnstile — that's the feature.** Headless Chrome
   never renders the widget, and a CDP-attached real browser gets Cloudflare's
   managed challenge. So the positive end-to-end path (token → chat) can only
@@ -232,7 +279,7 @@ If you ever exceed 100k requests/day, the paid Workers plan is $5/mo.
 |---|---|---|
 | `530` / site down | DNS record deleted or proxied off | re-add via **Domains & Routes** or redeploy |
 | "Forbidden origin" 403 | page served from a domain not in `ALLOWED_ORIGINS` | add origin, redeploy |
-| "Model not available" | id not in `ALLOWED_MODELS` or not on your key | check id against upstream `/v1/models` |
+| "Model not available" | only if `ALLOWED_MODELS` is non-empty and the id isn't in it (or not on your key) | empty the allowlist for live mode, or add the id, redeploy |
 | 429 immediately on every send | clock-skewed fixed window or shared NAT IP | wait 60 s; if persistent, raise `MAX_RPM` |
 | Chat fails only after Turnstile setup | sitekey/secret mismatch or wrong hostname on widget | widget hostnames must include `chat.latency.cyou` |
 | Old code still served | asset cache | hard refresh (Ctrl+Shift+R); assets are content-hashed so deploys are instant |

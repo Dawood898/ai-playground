@@ -115,10 +115,36 @@
 
       font-size: 12px;
       font-weight: 500;
+
+      text-decoration: none;
+
+      transition: color .14s ease;
+    }
+
+    .topbar-title:hover {
+      color: #d5d0c8;
+    }
+
+    .topbar-title::after {
+      content: "↗";
+
+      margin-left: 4px;
+
+      font-size: 10px;
+
+      color: #6f6962;
     }
 
     .topbar-spacer {
       flex: 1;
+    }
+
+    .rpm-clock {
+      margin-left: 2px;
+
+      color: var(--muted-dark);
+
+      font-variant-numeric: tabular-nums;
     }
 
     .rpm {
@@ -482,6 +508,8 @@
         );
 
       z-index: 10;
+      /* Clear the brand footer so it isn't painted over by the gradient. */
+      transform: translateY(-32px);
     }
 
     .composer-wrap {
@@ -747,12 +775,41 @@
       height: 13px;
     }
 
+    /* Stop state: the send button turns into a red stop button while a
+       request is in flight. Hidden icons/label swap via this class. */
+    .send .icon-stop,
+    .send.stop .icon-send {
+      display: none;
+    }
+
+    .send.stop {
+      color: #e0b3ae;
+
+      background: #3a2523;
+
+      border-color: rgba(183,106,99,.42);
+    }
+
+    .send.stop:hover:not(:disabled) {
+      color: #f1c9c4;
+
+      background: #44292a;
+
+      border-color: rgba(183,106,99,.6);
+    }
+
+    .send.stop .icon-stop {
+      display: block;
+    }
+
     /* ==========================================================
        TURNSTILE
-       Kept visible (bottom-left): if Cloudflare ever escalates to an
-       interactive challenge, a hidden widget could not be clicked and
-       the site would deadlock. interaction-only mode hides it until
-       that actually happens.
+       Kept visible (bottom-left) and rendered with
+       appearance:'always' so every page load requires the visitor
+       to actively pass the human check — the token is single-use
+       server-side, so a stale/auto token can never be reused.
+       The widget is reset (refreshed) on pageshow / tab focus and
+       after each API call.
     ========================================================== */
 
     #turnstile-box {
@@ -810,6 +867,110 @@
 
       transform:
         translate(-50%, 0);
+    }
+
+    /* ==========================================================
+       LIVE STATS
+    ========================================================== */
+
+    .live-stats {
+      display: flex;
+      align-items: center;
+
+      gap: 18px;
+
+      margin-top: 22px;
+
+      color: var(--muted-dark);
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+      font-size: 11px;
+
+      letter-spacing: .02em;
+    }
+
+    .live-stats:empty {
+      display: none;
+    }
+
+    .live-stats.hidden {
+      display: none;
+    }
+
+    .stat {
+      display: flex;
+      align-items: baseline;
+
+      gap: 6px;
+    }
+
+    .stat-label {
+      color: var(--muted);
+
+      font-size: 9.5px;
+
+      font-weight: 600;
+
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      color: #c5bfb7;
+
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ==========================================================
+       BRAND FOOTER
+    ========================================================== */
+
+    .brand-footer {
+      flex-shrink: 0;
+
+      display: flex;
+      justify-content: center;
+
+      gap: 5px;
+
+      padding: 0 24px 14px;
+
+      color: var(--muted-dark);
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+      font-size: 10.5px;
+
+      letter-spacing: .01em;
+
+      text-align: center;
+    }
+
+    .brand-footer a {
+      color: #a49f98;
+
+      text-decoration: underline;
+
+      text-underline-offset: 2px;
+
+      transition: color .14s ease;
+    }
+
+    .brand-footer a:hover {
+      color: #d5d0c8;
+    }
+
+    .brand-heart {
+      color: var(--danger);
     }
 
     /* ==========================================================
@@ -874,8 +1035,12 @@
         padding: 0 9px;
       }
 
-      .send span {
+      .send-label {
         display: none;
+      }
+
+      .brand-footer {
+        padding-bottom: 10px;
       }
     }
 
@@ -927,9 +1092,12 @@
 
   <header class="topbar">
 
-    <div class="topbar-title">
+    <a
+      class="topbar-title"
+      href="https://latency.cyou/"
+      title="Back to latency.cyou">
       Model Playground
-    </div>
+    </a>
 
     <div class="topbar-spacer"></div>
 
@@ -942,6 +1110,10 @@
       <span id="rpmText">
         10 / 10 left
       </span>
+
+      <span
+        id="rpmClock"
+        class="rpm-clock"></span>
 
     </div>
 
@@ -1109,6 +1281,32 @@
         class="messages">
       </section>
 
+      <!-- LIVE STATS -->
+
+      <div
+        id="liveStats"
+        class="live-stats hidden">
+
+        <span
+          class="stat">
+          <span
+            class="stat-label">TTFT</span>
+          <span
+            id="statTtft"
+            class="stat-value">—</span>
+        </span>
+
+        <span
+          class="stat">
+          <span
+            class="stat-label">Speed</span>
+          <span
+            id="statSpeed"
+            class="stat-value">—</span>
+        </span>
+
+      </div>
+
     </div>
 
   </main>
@@ -1143,103 +1341,9 @@
 
               <button
                 class="tool-button"
-                id="attachButton"
-                type="button"
-                title="Attach">
-
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6">
-
-                  <path
-                    d="m20 11.5-8.5 8.5a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/>
-
-                </svg>
-
-              </button>
-
-
-              <button
-                class="tool-button"
-                id="webButton"
-                type="button"
-                title="Web">
-
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5">
-
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="8.5"/>
-
-                  <path d="M3.5 12h17"/>
-
-                  <path
-                    d="M12 3.5c2.2 2.4 3.2 5.2 3.2 8.5S14.2 18.1 12 20.5"/>
-
-                  <path
-                    d="M12 3.5c-2.2 2.4-3.2 5.2-3.2 8.5s1 6.1 3.2 8.5"/>
-
-                </svg>
-
-              </button>
-
-
-              <button
-                class="tool-button"
-                id="optionsButton"
-                type="button"
-                title="Options">
-
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5">
-
-                  <path d="M4 7h10"/>
-                  <path d="M18 7h2"/>
-
-                  <path d="M4 12h2"/>
-                  <path d="M10 12h10"/>
-
-                  <path d="M4 17h10"/>
-                  <path d="M18 17h2"/>
-
-                  <circle
-                    cx="16"
-                    cy="7"
-                    r="1.5"/>
-
-                  <circle
-                    cx="8"
-                    cy="12"
-                    r="1.5"/>
-
-                  <circle
-                    cx="16"
-                    cy="17"
-                    r="1.5"/>
-
-                </svg>
-
-              </button>
-
-
-              <div class="tool-divider"></div>
-
-
-              <button
-                class="tool-button"
                 id="clearButton"
                 type="button"
-                title="Clear">
+                title="Clear Conversation">
 
                 <svg
                   viewBox="0 0 24 24"
@@ -1314,6 +1418,7 @@
                 type="submit">
 
                 <svg
+                  class="icon-send"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -1324,7 +1429,23 @@
 
                 </svg>
 
-                <span>
+                <svg
+                  class="icon-stop"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7">
+
+                  <rect
+                    x="7"
+                    y="7"
+                    width="10"
+                    height="10"
+                    rx="1.5"/>
+
+                </svg>
+
+                <span class="send-label">
                   Send
                 </span>
 
@@ -1341,6 +1462,20 @@
     </div>
 
   </div>
+
+  <footer class="brand-footer">
+    <span>
+      provided by
+      <a
+        href="https://discord.com/users/zealot.bond"
+        target="_blank"
+        rel="noopener">@zealot.bond</a>
+      on discord
+    </span>
+
+    <span
+      class="brand-heart">· made with ♥</span>
+  </footer>
 
 </div>
 
@@ -1447,9 +1582,29 @@
       'rpmText'
     );
 
+  const $rpmClock =
+    document.getElementById(
+      'rpmClock'
+    );
+
   const $toast =
     document.getElementById(
       'toast'
+    );
+
+  const $liveStats =
+    document.getElementById(
+      'liveStats'
+    );
+
+  const $statTtft =
+    document.getElementById(
+      'statTtft'
+    );
+
+  const $statSpeed =
+    document.getElementById(
+      'statSpeed'
     );
 
   /* ==========================================================
@@ -1463,6 +1618,8 @@
   let windowEnd = 0;
 
   let busy = false;
+
+  let activeController = null;
 
   const history = [];
 
@@ -1523,6 +1680,9 @@
 
     // api.js is loaded with async+defer, so turnstile.ready() would throw.
     // Explicit render() is the supported path here (fires via onload hook too).
+    // appearance:'always' keeps the checkbox visible bottom-left, so every
+    // page load requires the visitor to actively pass the human check — it is
+    // never skipped or auto-hidden until a challenge is forced.
     tsWidget =
       turnstile.render(
         '#turnstile-box',
@@ -1538,7 +1698,7 @@
             'compact',
 
           appearance:
-            'interaction-only',
+            'always',
 
           execution:
             'render',
@@ -1649,7 +1809,28 @@
 
   /* ==========================================================
      RATE LIMIT
+     Server rate-limits each session to MAX_RPM requests per
+     rolling 60s window (tracked per IP AND per session). The
+     page only knows how many it has made, so it shows a local
+     countdown that starts fresh on every page load and ticks
+     down to the next local window. The server window resets on
+     its own; this is a friendly estimate, not the authority.
   ========================================================== */
+
+  function fmtClock(seconds) {
+
+    const m =
+      Math.floor(
+        seconds / 60
+      );
+
+    const s =
+      seconds % 60;
+
+    return (
+      `${m}:${s < 10 ? '0' : ''}${s}`
+    );
+  }
 
   function tickRpm() {
 
@@ -1672,14 +1853,31 @@
         MAX_RPM - used
       );
 
+    const remaining =
+      Math.max(
+        0,
+        Math.ceil(
+          (windowEnd - now) /
+            1000
+        )
+      );
+
     $rpmText.textContent =
       `${left} / ${MAX_RPM} left`;
+
+    $rpmClock.textContent =
+      `· ${fmtClock(remaining)}`;
 
     $rpm.classList.toggle(
       'warn',
       left <= 2
     );
   }
+
+  // Refresh reset: each page load starts a fresh 60s window, so the
+  // countdown always begins at 60s and the full quota shows as unused.
+  windowEnd =
+    Date.now() + 60000;
 
   tickRpm();
 
@@ -2003,6 +2201,8 @@
           'hidden'
         );
 
+        clearStats();
+
         $input.value =
           '';
 
@@ -2017,54 +2217,77 @@
     );
 
   /* ==========================================================
-     OTHER TOOL BUTTONS
-  ========================================================== */
-
-  document
-    .getElementById(
-      'attachButton'
-    )
-    .addEventListener(
-      'click',
-      () => {
-
-        toast(
-          'Attachments are not enabled'
-        );
-      }
-    );
-
-  document
-    .getElementById(
-      'webButton'
-    )
-    .addEventListener(
-      'click',
-      () => {
-
-        toast(
-          'Web search is not enabled'
-        );
-      }
-    );
-
-  document
-    .getElementById(
-      'optionsButton'
-    )
-    .addEventListener(
-      'click',
-      () => {
-
-        toast(
-          'No additional options'
-        );
-      }
-    );
-
-  /* ==========================================================
      SEND
+     The send button doubles as a stop button while a request is
+     in flight: clicking it aborts the fetch via AbortController.
+     TTFT and live tokens/s are computed client-side from the SSE
+     stream and shown in the live-stats bar.
   ========================================================== */
+
+  function setSendBusy(
+    on
+  ) {
+
+    busy = on;
+
+    // Do NOT disable the button while busy — clicking it must still
+    // reach the submit handler so it can abort. The busy-submit branch
+    // calls AbortController.abort(); a disabled button would swallow
+    // the click and leave the stream unstoppable.
+    $send.disabled =
+      false;
+
+    $send.classList.toggle(
+      'stop',
+      on
+    );
+
+    $send
+      .querySelector(
+        '.send-label'
+      )
+      .textContent =
+      on ? 'Stop' : 'Send';
+  }
+
+  function updateStats(
+    ttft,
+    tokens,
+    elapsed
+  ) {
+
+    $liveStats.classList.remove(
+      'hidden'
+    );
+
+    if (ttft !== null) {
+
+      $statTtft.textContent =
+        `${ttft.toFixed(2)}s`;
+    }
+
+    if (
+      tokens > 0 &&
+      elapsed > 0
+    ) {
+
+      $statSpeed.textContent =
+        `${(tokens / elapsed).toFixed(1)} tk/s`;
+    }
+  }
+
+  function clearStats() {
+
+    $statTtft.textContent =
+      '—';
+
+    $statSpeed.textContent =
+      '—';
+
+    $liveStats.classList.add(
+      'hidden'
+    );
+  }
 
   $form.addEventListener(
     'submit',
@@ -2072,7 +2295,13 @@
 
       event.preventDefault();
 
+      // Busy => the button is the red Stop button; abort the stream.
       if (busy) {
+
+        if (activeController) {
+          activeController.abort();
+        }
+
         return;
       }
 
@@ -2099,15 +2328,22 @@
         return;
       }
 
-      busy = true;
-
-      $send.disabled =
-        true;
+      setSendBusy(true);
 
       $input.value =
         '';
 
       resizeInput();
+
+      activeController =
+        new AbortController();
+
+      // Timing for TTFT / tokens-per-second.
+      const t0 =
+        performance.now();
+
+      let firstTokenAt =
+        null;
 
       createMessage(
         'user',
@@ -2133,6 +2369,12 @@
 
       let accumulated =
         '';
+
+      let totalChars =
+        0;
+
+      let stopped =
+        false;
 
       try {
 
@@ -2163,6 +2405,9 @@
                 'POST',
 
               headers,
+
+              signal:
+                activeController.signal,
 
               body:
                 JSON.stringify({
@@ -2323,18 +2568,73 @@
                 const delta =
                   data
                     .choices?.[0]
-                    ?.delta
-                    ?.content;
+                    ?.delta;
 
-                if (delta) {
+                const reasoning =
+                  delta?.reasoning_content ||
+                  '';
 
-                  accumulated +=
-                    delta;
+                const content =
+                  delta?.content ||
+                  '';
 
-                  target.body.textContent =
-                    accumulated;
+                if (
+                  reasoning ||
+                  content
+                ) {
 
-                  scrollBottom();
+                  // First output token (content OR hidden reasoning) =>
+                  // mark TTFT. We count both toward token rate (the model
+                  // is producing tokens either way) but only display the
+                  // final content.
+                  if (
+                    firstTokenAt ===
+                    null
+                  ) {
+
+                    firstTokenAt =
+                      performance.now();
+
+                    updateStats(
+                      (firstTokenAt - t0) /
+                        1000,
+                      0,
+                      0
+                    );
+                  }
+
+                  totalChars +=
+                    reasoning.length +
+                    content.length;
+
+                  if (content) {
+
+                    accumulated +=
+                      content;
+
+                    target.body.textContent =
+                      accumulated;
+
+                    scrollBottom();
+                  }
+
+                  // Rough token heuristic: ~4 chars/token.
+                  const tokens =
+                    Math.round(
+                      totalChars /
+                        4
+                    );
+
+                  const elapsed =
+                    (performance.now() - t0) /
+                      1000;
+
+                  updateStats(
+                    (firstTokenAt - t0) /
+                      1000,
+                    tokens,
+                    elapsed
+                  );
                 }
 
               } catch {
@@ -2387,26 +2687,76 @@
 
       } catch (error) {
 
-        console.error(error);
+        if (
+          error &&
+          error.name ===
+            'AbortError'
+        ) {
 
-        target.article.className =
-          'message error';
+          // User hit Stop. Keep whatever streamed so far.
+          stopped =
+            true;
 
-        target.article
-          .querySelector(
-            '.message-role'
-          )
-          .textContent =
-          'Error';
+          if (accumulated) {
 
-        target.body.textContent =
-          'Network error — check your connection and try again.';
+            target.body.textContent =
+              accumulated;
+          } else {
 
-        history.pop();
+            accumulated =
+              '';
 
-        toast(
-          'Network error'
-        );
+            target.body.textContent =
+              'Stopped.';
+          }
+
+          target.article
+            .querySelector(
+              '.message-role'
+            )
+            .textContent =
+            'Stopped';
+
+          if (accumulated) {
+
+            history.push({
+              role:
+                'assistant',
+
+              content:
+                accumulated
+            });
+          } else {
+
+            history.pop();
+          }
+
+          toast(
+            'Stopped'
+          );
+        } else {
+
+          console.error(error);
+
+          target.article.className =
+            'message error';
+
+          target.article
+            .querySelector(
+              '.message-role'
+            )
+            .textContent =
+            'Error';
+
+          target.body.textContent =
+            'Network error — check your connection and try again.';
+
+          history.pop();
+
+          toast(
+            'Network error'
+          );
+        }
 
       } finally {
 
@@ -2414,10 +2764,15 @@
           'cursor'
         );
 
-        busy = false;
+        activeController =
+          null;
 
-        $send.disabled =
-          false;
+        if (!stopped) {
+
+          clearStats();
+        }
+
+        setSendBusy(false);
 
         $input.focus();
       }
@@ -2428,6 +2783,38 @@
   /* ==========================================================
      START
   ========================================================== */
+
+  // Force a fresh Turnstile challenge on every page load / restore.
+  // The widget is rendered with appearance:'always', so it is always
+  // visible; resetting it on pageshow (bfcache restore) and on tab
+  // focus re-runs the human check instead of reusing a stale token.
+  window.addEventListener(
+    'pageshow',
+    event => {
+
+      if (event.persisted) {
+
+        refreshTurnstile();
+
+        loadModels();
+      }
+    }
+  );
+
+  document.addEventListener(
+    'visibilitychange',
+    () => {
+
+      if (
+        document.visibilityState ===
+          'visible' &&
+        !busy
+      ) {
+
+        refreshTurnstile();
+      }
+    }
+  );
 
   setTimeout(
     () => {

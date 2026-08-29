@@ -30,8 +30,10 @@ UPSTREAM_BASE = "https://api.latency.cyou"
 # Comma-separated origins allowed to call this Worker:
 ALLOWED_ORIGINS = "https://chat.latency.cyou"
 # Comma-separated model ids exposed on the playground.
-# Empty = everything the token can see (NOT recommended).
-ALLOWED_MODELS = "deepseek-v4-flash,glm-5.3-flash,qwen3.8-flash,qwen3.8-max,kimi-k3,kimi-k2.7-code,gpt-5.6-sol,grok-4.6,llama-3-8b-instruct,mistral-small-24b-instruct-2501,codestral-latest"
+# LEAVE EMPTY for "live" mode: /v1/models returns exactly what the token can
+# see right now, and any model id passes the chat check. The page's dropdown
+# and the public API therefore never show a stale or dead model.
+ALLOWED_MODELS = ""
 
 # Secrets (set with `wrangler secret put`, never in this file):
 #   NEW_API_KEY           — a DEDICATED new-api token with its own quota, used only by this Worker
