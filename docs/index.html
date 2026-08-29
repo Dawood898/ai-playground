@@ -870,16 +870,18 @@
     }
 
     /* ==========================================================
-       LIVE STATS
+       MESSAGE STATS (per-message TTFT + tokens/s)
+       Rendered inside each assistant bubble so the values persist
+       after the stream finishes, unlike the old single live bar.
     ========================================================== */
 
-    .live-stats {
+    .message-stats {
       display: flex;
       align-items: center;
 
       gap: 18px;
 
-      margin-top: 22px;
+      margin-top: 8px;
 
       color: var(--muted-dark);
 
@@ -894,11 +896,11 @@
       letter-spacing: .02em;
     }
 
-    .live-stats:empty {
+    .message-stats:empty {
       display: none;
     }
 
-    .live-stats.hidden {
+    .message-stats.hidden {
       display: none;
     }
 
@@ -1281,32 +1283,6 @@
         class="messages">
       </section>
 
-      <!-- LIVE STATS -->
-
-      <div
-        id="liveStats"
-        class="live-stats hidden">
-
-        <span
-          class="stat">
-          <span
-            class="stat-label">TTFT</span>
-          <span
-            id="statTtft"
-            class="stat-value">—</span>
-        </span>
-
-        <span
-          class="stat">
-          <span
-            class="stat-label">Speed</span>
-          <span
-            id="statSpeed"
-            class="stat-value">—</span>
-        </span>
-
-      </div>
-
     </div>
 
   </main>
@@ -1590,21 +1566,6 @@
   const $toast =
     document.getElementById(
       'toast'
-    );
-
-  const $liveStats =
-    document.getElementById(
-      'liveStats'
-    );
-
-  const $statTtft =
-    document.getElementById(
-      'statTtft'
-    );
-
-  const $statSpeed =
-    document.getElementById(
-      'statSpeed'
     );
 
   /* ==========================================================
@@ -2143,6 +2104,113 @@
       body
     );
 
+    // Assistant messages carry their own TTFT + tokens/s row so the
+    // values persist after the stream finishes.
+    let stats = null;
+
+    if (role === 'assistant') {
+
+      stats =
+        document.createElement(
+          'div'
+        );
+
+      stats.className =
+        'message-stats';
+
+      const ttftStat =
+        document.createElement(
+          'span'
+        );
+
+      ttftStat.className =
+        'stat';
+
+      const ttftLabel =
+        document.createElement(
+          'span'
+        );
+
+      ttftLabel.className =
+        'stat-label';
+
+      ttftLabel.textContent =
+        'TTFT';
+
+      const ttftValue =
+        document.createElement(
+          'span'
+        );
+
+      ttftValue.className =
+        'stat-value';
+
+      ttftValue.textContent =
+        '—';
+
+      ttftStat.appendChild(
+        ttftLabel
+      );
+
+      ttftStat.appendChild(
+        ttftValue
+      );
+
+      const speedStat =
+        document.createElement(
+          'span'
+        );
+
+      speedStat.className =
+        'stat';
+
+      const speedLabel =
+        document.createElement(
+          'span'
+        );
+
+      speedLabel.className =
+        'stat-label';
+
+      speedLabel.textContent =
+        'Speed';
+
+      const speedValue =
+        document.createElement(
+          'span'
+        );
+
+      speedValue.className =
+        'stat-value';
+
+      speedValue.textContent =
+        '—';
+
+      speedStat.appendChild(
+        speedLabel
+      );
+
+      speedStat.appendChild(
+        speedValue
+      );
+
+      stats.appendChild(
+        ttftStat
+      );
+
+      stats.appendChild(
+        speedStat
+      );
+
+      stats.classList.add(
+        'hidden'
+      );
+
+      article.appendChild(
+        stats
+      );
+    }
+
     $messages.appendChild(
       article
     );
@@ -2151,7 +2219,8 @@
 
     return {
       article,
-      body
+      body,
+      stats
     };
   }
 
@@ -2201,8 +2270,6 @@
           'hidden'
         );
 
-        clearStats();
-
         $input.value =
           '';
 
@@ -2221,7 +2288,8 @@
      The send button doubles as a stop button while a request is
      in flight: clicking it aborts the fetch via AbortController.
      TTFT and live tokens/s are computed client-side from the SSE
-     stream and shown in the live-stats bar.
+     stream and written to the assistant message's own stats row,
+     where they persist after the stream finishes.
   ========================================================== */
 
   function setSendBusy(
@@ -2251,18 +2319,29 @@
   }
 
   function updateStats(
+    target,
     ttft,
     tokens,
     elapsed
   ) {
 
-    $liveStats.classList.remove(
+    const stats = target.stats;
+
+    if (!stats) {
+      return;
+    }
+
+    stats.classList.remove(
       'hidden'
     );
 
     if (ttft !== null) {
 
-      $statTtft.textContent =
+      stats
+        .querySelector(
+          '.stat:first-child .stat-value'
+        )
+        .textContent =
         `${ttft.toFixed(2)}s`;
     }
 
@@ -2271,22 +2350,13 @@
       elapsed > 0
     ) {
 
-      $statSpeed.textContent =
+      stats
+        .querySelector(
+          '.stat:nth-child(2) .stat-value'
+        )
+        .textContent =
         `${(tokens / elapsed).toFixed(1)} tk/s`;
     }
-  }
-
-  function clearStats() {
-
-    $statTtft.textContent =
-      '—';
-
-    $statSpeed.textContent =
-      '—';
-
-    $liveStats.classList.add(
-      'hidden'
-    );
   }
 
   $form.addEventListener(
@@ -2596,6 +2666,7 @@
                       performance.now();
 
                     updateStats(
+                      target,
                       (firstTokenAt - t0) /
                         1000,
                       0,
@@ -2630,6 +2701,7 @@
                       1000;
 
                   updateStats(
+                    target,
                     (firstTokenAt - t0) /
                       1000,
                     tokens,
@@ -2767,10 +2839,8 @@
         activeController =
           null;
 
-        if (!stopped) {
-
-          clearStats();
-        }
+        // Stats stay on the message: we keep TTFT + tokens/s visible
+        // after the stream finishes (per-message row), so nothing to clear.
 
         setSendBusy(false);
 
