@@ -482,6 +482,251 @@
     }
 
     /* ==========================================================
+       MARKDOWN (rendered assistant messages)
+    ========================================================== */
+
+    /* Assistant output is Markdown-rendered; keep its block layout clean.
+       User messages stay pre-wrapped so the visitor sees their exact text. */
+    .message.assistant .message-body {
+      white-space: normal;
+    }
+
+    .message-body h1,
+    .message-body h2,
+    .message-body h3,
+    .message-body h4,
+    .message-body h5,
+    .message-body h6 {
+      margin: 18px 0 8px;
+
+      color: #e3ded7;
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+      font-weight: 600;
+
+      line-height: 1.3;
+
+      letter-spacing: -.01em;
+    }
+
+    .message-body h1 {
+      font-size: 19px;
+    }
+
+    .message-body h2 {
+      font-size: 17px;
+    }
+
+    .message-body h3 {
+      font-size: 15px;
+    }
+
+    .message-body h4,
+    .message-body h5,
+    .message-body h6 {
+      font-size: 14px;
+    }
+
+    .message-body p {
+      margin: 10px 0;
+    }
+
+    .message-body ul,
+    .message-body ol {
+      margin: 10px 0;
+
+      padding-left: 22px;
+    }
+
+    .message-body li {
+      margin: 3px 0;
+    }
+
+    .message-body blockquote {
+      margin: 10px 0;
+
+      padding: 6px 12px;
+
+      border-left: 3px solid var(--border);
+
+      color: var(--text-secondary);
+
+      background: rgba(255,255,255,.01);
+    }
+
+    .message-body hr {
+      margin: 16px 0;
+
+      border: 0;
+
+      border-top: 1px solid var(--border);
+    }
+
+    .message-body strong {
+      color: #efe9e0;
+
+      font-weight: 700;
+    }
+
+    /* ==========================================================
+       CODE BLOCKS + COPY BUTTON
+    ========================================================== */
+
+    .message-body .code-block {
+      margin: 14px 0;
+
+      border: 1px solid var(--border);
+
+      background: #11100f;
+    }
+
+    .code-head {
+      height: 32px;
+
+      display: flex;
+      align-items: center;
+
+      padding: 0 10px;
+
+      border-bottom: 1px solid var(--border);
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    .code-lang {
+      color: var(--muted);
+
+      font-size: 9.5px;
+      font-weight: 600;
+
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .copy-code {
+      margin-left: auto;
+
+      padding: 4px 9px;
+
+      border: 1px solid var(--border);
+
+      background: #1c1b19;
+
+      color: #8f897f;
+
+      cursor: pointer;
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+      font-size: 10px;
+
+      transition:
+        color .14s ease,
+        background .14s ease,
+        border-color .14s ease;
+    }
+
+    .copy-code:hover {
+      color: #cfc9c0;
+
+      background: #262421;
+
+      border-color: var(--border-hover);
+    }
+
+    .copy-code.copied {
+      color: var(--success);
+
+      border-color: rgba(120,152,120,.4);
+    }
+
+    .message-body .code-block pre {
+      margin: 0;
+
+      border: 0;
+
+      border-radius: 0;
+    }
+
+    .message-body .code-block pre code {
+      display: block;
+
+      padding: 14px;
+
+      border: 0;
+
+      border-radius: 0;
+
+      background: transparent;
+    }
+
+    /* ==========================================================
+       REGENERATE
+    ========================================================== */
+
+    .regenerate {
+      display: inline-flex;
+      align-items: center;
+
+      gap: 6px;
+
+      margin-top: 10px;
+
+      padding: 5px 9px;
+
+      border: 1px solid transparent;
+
+      background: transparent;
+
+      color: var(--muted);
+
+      cursor: pointer;
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+
+      font-size: 10.5px;
+
+      transition:
+        color .14s ease,
+        border-color .14s ease,
+        background .14s ease;
+    }
+
+    .regenerate:hover {
+      color: #cfc9c0;
+
+      background: rgba(255,255,255,.025);
+    }
+
+    .regenerate:disabled {
+      opacity: .4;
+
+      cursor: not-allowed;
+    }
+
+    .regenerate svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    /* ==========================================================
        COMPOSER BACKDROP
     ========================================================== */
 
@@ -2050,6 +2295,259 @@
      MESSAGES
   ========================================================== */
 
+
+  /* ==========================================================
+     MESSAGES
+  ========================================================== */
+
+  // Shown in place of any red-box error, so visitors never see the raw
+  // server/network failure text.
+  const ERROR_MESSAGE =
+    'This model is not available for testing at https://chat.latency.cyou/';
+
+  // One entry per send/regenerate turn, keyed by its turn index. Lets a
+  // regenerate icon re-run just its own prompt and rewrite the reply without
+  // disturbing earlier turns.
+  const turns =
+    [];
+
+  function escapeHtml(value) {
+
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Inline markdown: `code`, **bold**, *italic*, _italic_, [link](url).
+  // Runs on already-escaped text, so it can never emit raw HTML (no XSS).
+  const BT = String.fromCharCode(96); // backtick
+
+  function inlineMarkdown(text) {
+
+    let result =
+      String(text);
+
+    result =
+      result.replace(
+        new RegExp(BT + '([^' + BT + ']+)' + BT, 'g'),
+        '<code>$1</code>'
+      );
+
+    result =
+      result.replace(
+        /\*\*([^*]+)\*\*/g,
+        '<strong>$1</strong>'
+      );
+
+    result =
+      result.replace(
+        /(^|[^*])\*([^*\n]+)\*/g,
+        '$1<em>$2</em>'
+      );
+
+    result =
+      result.replace(
+        /_([^_\n]+)_/g,
+        '<em>$1</em>'
+      );
+
+    result =
+      result.replace(
+        /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener">$1</a>'
+      );
+
+    return result;
+  }
+
+  function renderMarkdown(source) {
+
+    if (!source) {
+      return '';
+    }
+
+    const lines =
+      String(source).split('\n');
+
+    const out =
+      [];
+
+    let para =
+      [];
+
+    let list =
+      null;
+
+    const flushPara = () => {
+      if (para.length) {
+        out.push('<p>' + inlineMarkdown(para.join('<br/>')) + '</p>');
+        para = [];
+      }
+    };
+
+    const flushList = () => {
+      if (list) {
+        const tag = list.type === 'ol' ? 'ol' : 'ul';
+        out.push('<' + tag + '>' + list.items.map(item => '<li>' + inlineMarkdown(item) + '</li>').join('') + '</' + tag + '>');
+        list = null;
+      }
+    };
+
+    const codeFence =
+      new RegExp('^' + BT + BT + BT + '([a-zA-Z0-9+-]*)\\s*$');
+
+    const closeFence =
+      new RegExp('^' + BT + BT + BT + '\\s*$');
+
+    for (let i = 0; i < lines.length; i++) {
+
+      const line =
+        lines[i];
+
+      if (codeFence.test(line)) {
+
+        flushPara();
+        flushList();
+
+        const lang =
+          (line.match(codeFence) || [])[1] || '';
+
+        const codeLines =
+          [];
+
+        i++;
+
+        while (i < lines.length && !closeFence.test(lines[i])) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+
+        out.push(
+          '<div class="code-block">' +
+            '<div class="code-head">' +
+              '<span class="code-lang">' + escapeHtml(lang) + '</span>' +
+              '<button class="copy-code" type="button" title="Copy code">Copy</button>' +
+            '</div>' +
+            '<pre><code>' + escapeHtml(codeLines.join('\n')) + '</code></pre>' +
+          '</div>'
+        );
+
+        continue;
+      }
+
+      const heading =
+        line.match(/^(#{1,6})\s+(.*)$/);
+
+      if (heading) {
+
+        flushPara();
+        flushList();
+
+        const level =
+          heading[1].length;
+
+        out.push('<h' + level + '>' + inlineMarkdown(heading[2]) + '</h' + level + '>');
+
+        continue;
+      }
+
+      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) {
+        flushPara();
+        flushList();
+        out.push('<hr/>');
+        continue;
+      }
+
+      if (/^>\s?/.test(line)) {
+
+        flushPara();
+        flushList();
+
+        const quote =
+          [];
+
+        while (i < lines.length && /^>\s?/.test(lines[i])) {
+          quote.push(lines[i].replace(/^>\s?/, ''));
+          i++;
+        }
+
+        i--;
+
+        out.push('<blockquote>' + inlineMarkdown(quote.join('<br/>')) + '</blockquote>');
+
+        continue;
+      }
+
+      const bullet =
+        line.match(/^\s*[-*+]\s+(.*)$/);
+
+      if (bullet) {
+        flushPara();
+        if (list && list.type !== 'ul') flushList();
+        if (!list) list = { type: 'ul', items: [] };
+        list.items.push(bullet[1]);
+        continue;
+      }
+
+      const ordered =
+        line.match(/^\s*\d+\.\s+(.*)$/);
+
+      if (ordered) {
+        flushPara();
+        if (list && list.type !== 'ol') flushList();
+        if (!list) list = { type: 'ol', items: [] };
+        list.items.push(ordered[1]);
+        continue;
+      }
+
+      if (/^\s*$/.test(line)) {
+        flushPara();
+        flushList();
+        continue;
+      }
+
+      flushList();
+      para.push(line);
+    }
+
+    flushPara();
+    flushList();
+
+    return out.join('');
+  }
+
+  function addRegenerateButton(article, turnIndex) {
+
+    if (article.querySelector('.regenerate')) return;
+
+    const button =
+      document.createElement('button');
+
+    button.className =
+      'regenerate';
+
+    button.type =
+      'button';
+
+    button.title =
+      'Regenerate';
+
+    button.dataset.turn =
+      String(turnIndex);
+
+    button.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">' +
+        '<path d="M20 12a8 8 0 1 1-2.34-5.66"/>' +
+        '<path d="M20 4v4h-4"/>' +
+      '</svg>' +
+      '<span>Regenerate</span>';
+
+    article.appendChild(button);
+  }
+
   function createMessage(
     role,
     text = ''
@@ -2285,6 +2783,8 @@
 
         history.length = 0;
 
+        turns.length = 0;
+
         $messages.innerHTML =
           '';
 
@@ -2400,78 +2900,237 @@
       const text =
         $input.value.trim();
 
-      const model =
-        $model.value;
-
       if (!text) {
         return;
       }
-
-      if (
-        !model ||
-        model.includes('Failed') ||
-        model.includes('available')
-      ) {
-
-        toast(
-          'Select a model first'
-        );
-
-        return;
-      }
-
-      setSendBusy(true);
 
       $input.value =
         '';
 
       resizeInput();
 
-      activeController =
-        new AbortController();
-
-      // Timing for TTFT / tokens-per-second.
-      const t0 =
-        performance.now();
-
-      let firstTokenAt =
-        null;
-
-      // A new send re-engages stick-to-bottom so the user message and the
-      // streamed answer scroll into view even if the visitor had scrolled up.
-      stickBottom =
-        true;
-
-      createMessage(
-        'user',
-        text
+      startTurn(
+        text,
+        turns.length
       );
+    }
+  );
 
-      history.push({
-        role:
-          'user',
+  // Re-run a single turn (regenerate). It strips that turn and everything
+  // after it from history + the page, then re-sends the same prompt.
+  function regenerateTurn(turnIndex) {
 
-        content:
-          text
-      });
+    if (busy) {
 
-      const target =
-        createMessage(
-          'assistant'
+      return;
+    }
+
+    const turn =
+      turns[turnIndex];
+
+    if (!turn) {
+
+      return;
+    }
+
+    // Keep everything strictly before this turn.
+    history.length =
+      turn.historyStart;
+
+    // Drop this turn and anything after it from the DOM.
+    for (let i = turns.length - 1; i >= turnIndex; i--) {
+
+      const t =
+        turns[i];
+
+      if (t) {
+
+        if (t.userEl) t.userEl.remove();
+        if (t.assistantEl) t.assistantEl.remove();
+      }
+    }
+
+    turns.length =
+      turnIndex;
+
+    startTurn(
+      turn.prompt,
+      turnIndex
+    );
+  }
+
+  // Delegated clicks: regenerate turns + copy code blocks.
+  $messages.addEventListener(
+    'click',
+    event => {
+
+      const regenerate =
+        event.target.closest(
+          '.regenerate'
         );
 
-      target.article.classList.add(
-        'cursor'
+      if (regenerate) {
+
+        const index =
+          Number(
+            regenerate.dataset.turn
+          );
+
+        if (
+          !Number.isNaN(index)
+        ) {
+
+          regenerateTurn(index);
+        }
+
+        return;
+      }
+
+      const copy =
+        event.target.closest(
+          '.copy-code'
+        );
+
+      if (copy) {
+
+        const codeElement =
+          copy
+            .closest('.code-block')
+            ?.querySelector('pre code');
+
+        const codeText =
+          codeElement
+            ? codeElement.textContent
+            : '';
+
+        if (
+          codeText &&
+          navigator.clipboard &&
+          navigator.clipboard.writeText
+        ) {
+
+          navigator.clipboard
+            .writeText(codeText)
+            .then(
+              () => {
+
+                copy.classList.add(
+                  'copied'
+                );
+
+                copy.textContent =
+                  'Copied';
+
+                setTimeout(
+                  () => {
+
+                    copy.classList.remove(
+                      'copied'
+                    );
+
+                    copy.textContent =
+                      'Copy';
+                  },
+                  1400
+                );
+              }
+            );
+        }
+
+        return;
+      }
+    }
+  );
+
+  // Shared send path: builds the user + assistant messages, streams the reply,
+  // and records the turn so a regenerate button can replay just this prompt.
+  async function startTurn(
+    prompt,
+    turnIndex
+  ) {
+
+    const model =
+      $model.value;
+
+    if (
+      !model ||
+      model.includes('Failed') ||
+      model.includes('available')
+    ) {
+
+      toast(
+        'Select a model first'
       );
 
-      let accumulated =
-        '';
+      return;
+    }
 
-      let totalChars =
-        0;
+    setSendBusy(true);
 
-      let stopped =
-        false;
+    activeController =
+      new AbortController();
+
+    // Timing for TTFT / tokens-per-second.
+    const t0 =
+      performance.now();
+
+    let firstTokenAt =
+      null;
+
+    // Re-engage stick-to-bottom so the prompt and the streamed reply scroll
+    // into view, even if the visitor had scrolled up.
+    stickBottom =
+      true;
+
+    const historyStart =
+      history.length;
+
+    const userMsg =
+      createMessage(
+        'user',
+        prompt
+      );
+
+    addRegenerateButton(
+      userMsg.article,
+      turnIndex
+    );
+
+    history.push({
+      role:
+        'user',
+
+      content:
+        prompt
+    });
+
+    const target =
+      createMessage(
+        'assistant'
+      );
+
+    target.article.classList.add(
+      'cursor'
+    );
+
+    turns[turnIndex] =
+      {
+        prompt,
+        userEl:
+          userMsg.article,
+        assistantEl:
+          target.article,
+        historyStart
+      };
+
+    let accumulated =
+      '';
+
+    let totalChars =
+      0;
+
+    let stopped =
+      false;
 
       try {
 
@@ -2577,7 +3236,7 @@
             'Error';
 
           target.body.textContent =
-            message;
+            ERROR_MESSAGE;
 
           history.pop();
 
@@ -2719,8 +3378,10 @@
                     accumulated +=
                       content;
 
-                    target.body.textContent =
-                      accumulated;
+                    target.body.innerHTML =
+                      renderMarkdown(
+                        accumulated
+                      );
 
                     scrollBottom();
                   }
@@ -2757,8 +3418,10 @@
             accumulated =
               '(empty response)';
 
-            target.body.textContent =
-              accumulated;
+            target.body.innerHTML =
+              renderMarkdown(
+                accumulated
+              );
           }
 
           history.push({
@@ -2781,8 +3444,10 @@
               ?.content ||
             '(empty response)';
 
-          target.body.textContent =
-            accumulated;
+          target.body.innerHTML =
+            renderMarkdown(
+              accumulated
+            );
 
           history.push({
             role:
@@ -2807,8 +3472,10 @@
 
           if (accumulated) {
 
-            target.body.textContent =
-              accumulated;
+            target.body.innerHTML =
+              renderMarkdown(
+                accumulated
+              );
           } else {
 
             accumulated =
@@ -2857,7 +3524,7 @@
             'Error';
 
           target.body.textContent =
-            'Network error — check your connection and try again.';
+            ERROR_MESSAGE;
 
           history.pop();
 
@@ -2878,13 +3545,17 @@
         // Stats stay on the message: we keep TTFT + tokens/s visible
         // after the stream finishes (per-message row), so nothing to clear.
 
+        addRegenerateButton(
+          target.article,
+          turnIndex
+        );
+
         setSendBusy(false);
 
         $input.focus();
       }
 
     }
-  );
 
   /* ==========================================================
      START

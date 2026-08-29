@@ -210,8 +210,11 @@ All behavior is client-side; nothing needs a backend change to tweak.
   Worker keeps a `VERIFY_TTL_SECONDS` session grant, so `loadModels()` and
   the `pageshow` / `visibilitychange` handlers no longer reset the widget —
   bfcache restores and tab refocus do NOT re-run the human check.
-- **Live model dropdown.** The select is populated by `loadModels()` from
-  `/v1/models`; with the empty allowlist that's the full live list.
+- **Markdown rendering.** Assistant replies render through a small, dependency-free inline Markdown renderer: headings, **bold**, *italic*, `inline code`, fenced code blocks, bullet/ordered lists, blockquotes, links and horizontal rules. Output is HTML-escaped before parsing, so model text can never inject live HTML/scripts.
+- **Copy a code block in one click.** Every fenced code block gets a header band with the language label and a **Copy** button that copies the whole block to the clipboard (shows "Copied" for a moment).
+- **Regenerate a turn.** Each user message and each assistant reply carries a small **Regenerate** icon below it. Clicking it re-sends just that prompt (turning over the reply) without touching earlier turns — history is truncated to right before the turn and the answer is re-streamed.
+- **Friendly red-box errors.** Any server/network failure is replaced in the error bubble with a single line — `This model is not available for testing at https://chat.latency.cyou/` — so visitors never see raw HTTP/error text.
+- **Live model dropdown.** The select is populated by `loadModels()` from `/v1/models`; with the empty allowlist that's the full live list.
 - **Removed dead tools.** Attach / Web / Options buttons and their no-op
   listeners are gone; only **Clear** remains on the toolbar.
 - **Branding.** Header title links to https://latency.cyou/; the footer
